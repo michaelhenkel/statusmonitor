@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"time"
 
 	"gopkg.in/yaml.v2"
@@ -405,24 +406,46 @@ func updateControlStatus(config *Config, controlStatus contrailOperatorTypes.Con
 	controlObject := contrailOperatorTypes.Control{}
 	err := restClient.Get().Namespace(config.Namespace).Resource("controls").Name(config.NodeName).Do().Into(&controlObject)
 	check(err)
-
+	update := false
 	if controlObject.Status.ServiceStatus == nil {
 		var serviceStatus = make(map[string]contrailOperatorTypes.ControlServiceStatus)
 		serviceStatus[config.Hostname] = controlStatus
 		controlObject.Status.ServiceStatus = serviceStatus
+		update = true
 	} else {
-		controlObject.Status.ServiceStatus[config.Hostname] = controlStatus
+		if v, ok := controlObject.Status.ServiceStatus[config.Hostname]; ok {
+			same := reflect.DeepEqual(v, controlStatus)
+			if !same {
+				controlObject.Status.ServiceStatus[config.Hostname] = controlStatus
+				update = true
+			}
+		} else {
+			controlObject.Status.ServiceStatus[config.Hostname] = controlStatus
+			update = true
+		}
 	}
-	result := contrailOperatorTypes.Control{}
-	err = restClient.Put().Namespace(config.Namespace).Resource("controls").Name(config.NodeName).SubResource("status").Body(&controlObject).Do().Into(&result)
+	if update {
+		result := contrailOperatorTypes.Control{}
+		/*
+			retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 
-	check(err)
+				result, getErr := deploymentsClient.Get("demo-deployment", metav1.GetOptions{})
+				if getErr != nil {
+					panic(fmt.Errorf("Failed to get latest version of Deployment: %v", getErr))
+				}
 
-	controlObject = contrailOperatorTypes.Control{}
-	err = restClient.Get().Namespace(config.Namespace).Resource("controls").Name(config.NodeName).Do().Into(&controlObject)
-	check(err)
-	fmt.Println(controlObject.Status.ServiceStatus)
-
+				result.Spec.Replicas = int32Ptr(1)                           // reduce replica count
+				result.Spec.Template.Spec.Containers[0].Image = "nginx:1.13" // change nginx version
+				_, updateErr := deploymentsClient.Update(result)
+				return updateErr
+			})
+			if retryErr != nil {
+				panic(fmt.Errorf("Update failed: %v", retryErr))
+			}
+		*/
+		err = restClient.Put().Namespace(config.Namespace).Resource("controls").Name(config.NodeName).SubResource("status").Body(&controlObject).Do().Into(&result)
+		check(err)
+	}
 	return nil
 }
 
